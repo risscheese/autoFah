@@ -104,17 +104,13 @@ gobuster dir \
     --threads "$GOBUSTER_THREADS" \
     --no-error \
     -q \
-    | grep -E "(Status: (200|204|301|302)|^/)" \
+    | grep -E "Status: (200|204|301|302)" \
     | awk -v t="$TARGET" '
-        /^\//{  # gobuster v3+ format: /path (Status: 200)
+        {
             path = $1
-            gsub(/\/+$/, "", path)
-            if (path != "") print t path
-        }
-        /Status:/{  # gobuster v2 format: /path  (Status: 200)
-            path = $1
-            gsub(/\/+$/, "", path)
-            if (path != "") print t path
+            gsub(/^\/+/, "", path)   # strip any leading slashes
+            gsub(/\/+$/, "", path)   # strip any trailing slashes
+            if (path != "") print t "/" path
         }
     ' | sort -u >> "$DIR_FILE"
 
@@ -148,12 +144,13 @@ while read -r FULL_URL; do
     echo "$GOBUSTER_OUTPUT" >> "$RESULT_FILE"
     echo "" >> "$RESULT_FILE"
 
-    # Build full URLs — handle both gobuster v2 and v3 output
+    # Build full URLs — strip base trailing slash, normalise path, re-join
     echo "$GOBUSTER_OUTPUT" | awk -v base="$FULL_URL" '
         {
             path = $1
-            gsub(/^\/+/, "", path)
-            gsub(/\/+$/, "", path)
+            gsub(/^\/+/, "", path)   # strip any leading slashes
+            gsub(/\/+$/, "", path)   # strip any trailing slashes
+            gsub(/\/+$/, "", base)   # ensure base has no trailing slash
             if (path != "") print base "/" path
         }
     ' >> "$ALL_PATHS"
