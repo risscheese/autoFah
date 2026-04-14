@@ -59,8 +59,8 @@ pip3 install requests beautifulsoup4 packaging
 ## Installation
 
 ```bash
-git clone https://github.com/risscheese/autoFuzz.git
-cd autoFuzz
+git clone https://github.com/risscheese/autoFah.git
+cd autoFah
 chmod +x autoFah.sh detail_FahScan.sh
 ```
 
@@ -85,7 +85,7 @@ chmod +x autoFah.sh detail_FahScan.sh
 #### Example output (truncated)
 
 ```
-  autoFuzz — Detail Scan Pipeline
+  autoFah — Detail Scan Pipeline
   Target  : http://192.168.8.101
   Started : 2026-04-14 11:30:00
 
