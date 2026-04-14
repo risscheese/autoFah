@@ -6,7 +6,7 @@ from __future__ import annotations
 #  Used by detail_scan.sh Stage 4
 #
 #  Usage:
-#    python3 vuln_scan.py [FULL_URL.txt] [--out DIR]
+#    python3 vuln_scan.py [dir_discovery.txt] [--out DIR]
 #                         [--threads N] [--timeout S]
 #
 #  Key improvements over v1:
@@ -194,8 +194,8 @@ def run_nuclei(url_list_path: Path, out_dir: Path, timeout: int) -> dict:
 
 def parse_args():
     p = argparse.ArgumentParser(description="vuln_scan.py — parallel Nikto + Nuclei scanner")
-    p.add_argument("input_file", nargs="?", default="FULL_URL.txt",
-                   help="File with one URL per line (default: FULL_URL.txt)")
+    p.add_argument("input_file", nargs="?", default="dir_discovery.txt",
+                   help="File with one URL per line (default: dir_discovery.txt)")
     p.add_argument("--out",     default="vuln_results",
                    help="Output directory (default: vuln_results)")
     p.add_argument("--threads", type=int, default=4,
