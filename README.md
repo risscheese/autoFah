@@ -1,4 +1,4 @@
-# autoFuzz — Detail Web Recon & Vulnerability Pipeline
+# autoFah — Detail Web Recon & Vulnerability Pipeline
 
 A multi-stage automated web reconnaissance and vulnerability scanning toolkit
 designed for penetration testers and security researchers.
