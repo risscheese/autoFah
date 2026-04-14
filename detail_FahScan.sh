@@ -1,13 +1,14 @@
 #!/bin/bash
 
 # ============================================================
-#  detail_scan.sh — Multi-stage recon & vulnerability pipeline
+#  detail_FahScan.sh — Multi-stage recon & vulnerability pipeline
 #
 #  Stage 1 : Directory brute-force            (gobuster)
 #  Stage 2 : Hidden file discovery per dir   (gobuster)
 #  Stage 3 : Parameter & method detection    (para.py)
 #  Stage 4 : Vulnerability scanning          (vuln_scan.py → nikto + nuclei)
 #  Stage 5 : Component version intelligence  (version_scan.py)
+#  Stage 6 : Path & file vulnerability intel (path_intel.py)
 # ============================================================
 
 TARGET=$1
@@ -23,6 +24,8 @@ ALL_PATHS="FULL_URL.txt"
 PARAM_REPORT="param_discovery_report.txt"
 VERSION_REPORT="version_report.txt"
 VERSION_JSON="version_results.json"
+PATH_REPORT="path_intel_report.txt"
+PATH_JSON="path_intel_results.json"
 
 # ── tuning ───────────────────────────────────────────────────
 GOBUSTER_THREADS=20
@@ -32,12 +35,15 @@ VULN_THREADS=4
 VULN_TIMEOUT=300
 VERSION_THREADS=5
 VERSION_TIMEOUT=10
+PATH_THREADS=10
+PATH_TIMEOUT=10
 
 # ── script location (so Python scanners are found reliably) ──
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PARAM_SCANNER="$SCRIPT_DIR/para.py"
 VULN_SCANNER="$SCRIPT_DIR/vuln_scan.py"
 VERSION_SCANNER="$SCRIPT_DIR/version_scan.py"
+PATH_SCANNER="$SCRIPT_DIR/path_intel.py"
 
 # ── colours ──────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -262,6 +268,38 @@ else
     echo -e "    ${CYAN}Version JSON   → $VERSION_JSON${NC}"
 fi
 
+# ============================================================
+# STAGE 6 — Path & file vulnerability intelligence
+# ============================================================
+echo -e "\n${BOLD}${CYAN}[+] ══════════════════════════════════════${NC}"
+echo -e "${BOLD}${CYAN}    STAGE 6: Path & File Vulnerability Intel${NC}"
+echo -e "${BOLD}${CYAN}[+] ══════════════════════════════════════${NC}"
+
+if [ ! -f "$PATH_SCANNER" ]; then
+    echo -e "${RED}[!] path_intel.py not found: $PATH_SCANNER${NC}"
+    exit 1
+fi
+
+STAGE6_START=$(date +%s)
+echo -e "${YELLOW}[~] Launching path_intel.py — analysing dirs and files for vulns...${NC}"
+
+python3 "$PATH_SCANNER" \
+    "$ALL_PATHS" \
+    --dirs     "$DIR_FILE" \
+    --out-txt  "$PATH_REPORT" \
+    --out-json "$PATH_JSON" \
+    --threads  "$PATH_THREADS" \
+    --timeout  "$PATH_TIMEOUT"
+
+STAGE6_RC=$?
+if [ $STAGE6_RC -ne 0 ]; then
+    echo -e "${RED}[!] path_intel.py exited with code $STAGE6_RC${NC}"
+else
+    echo -e "${GREEN}[+] Stage 6 done in $(elapsed $STAGE6_START)s.${NC}"
+    echo -e "    ${CYAN}Path report → $PATH_REPORT${NC}"
+    echo -e "    ${CYAN}Path JSON   → $PATH_JSON${NC}"
+fi
+
 # ── Final pipeline summary ───────────────────────────────────
 TOTAL_ELAPSED=$(elapsed $PIPELINE_START)
 
@@ -276,4 +314,6 @@ echo -e "    ${CYAN}Stage 3 param report : $PARAM_REPORT${NC}"
 echo -e "    ${CYAN}Stage 4 vuln results : vuln_results/${NC}"
 echo -e "    ${CYAN}Stage 5 ver report   : $VERSION_REPORT${NC}"
 echo -e "    ${CYAN}Stage 5 ver JSON     : $VERSION_JSON${NC}"
+echo -e "    ${CYAN}Stage 6 path report  : $PATH_REPORT${NC}"
+echo -e "    ${CYAN}Stage 6 path JSON    : $PATH_JSON${NC}"
 echo ""
