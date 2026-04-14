@@ -183,7 +183,7 @@ URL_RULES: list[tuple[str, str, str, re.Pattern]] = [
     # ── Backup / Temp Copies of Files ─────────────────────────
     ("Sensitive Exposure", "MEDIUM",
      "Backup copy of a file — source code or config exposed",
-     re.compile(r'\.(bak|old|orig|backup|save|swp|tmp|temp|copy)$', re.I)),
+     re.compile(r'\.(bak|old|orig|backup|save|tmp|temp|copy)$', re.I)),
 
     ("Sensitive Exposure", "MEDIUM",
      "Vim swap file — unsaved editor session leaks source",
