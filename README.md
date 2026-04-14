@@ -341,7 +341,7 @@ All findings in this toolkit are **evidence-based** — nothing is fabricated:
 ## File Structure
 
 ```
-autoFuzz/
+autoFah/
 ├── autoFah.sh               # Quick 2-stage recon
 ├── detail_FahScan.sh        # Full 6-stage pipeline
 ├── para.py                  # Stage 3 — parameter discovery
