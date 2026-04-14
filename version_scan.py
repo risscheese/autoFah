@@ -356,21 +356,41 @@ class Assessment:
 
 # ═══════════════════════════════════════════════════════════════
 # VERSION COMPARISON
+# Uses `packaging.version.parse` for correct semantic versioning
+# including pre-releases (rc), post-releases, and letter suffixes
+# like OpenSSL's "1.1.1t" (fix 1 for feedback point 1).
 # ═══════════════════════════════════════════════════════════════
 
-def _parse_ver(v: str) -> tuple[int, ...]:
-    """Convert '7.4.33' → (7, 4, 33).  Non-numeric parts dropped."""
-    parts = []
-    for seg in re.split(r'[.\-_]', v):
-        m = re.match(r'(\d+)', seg)
-        if m:
-            parts.append(int(m.group(1)))
-    return tuple(parts) if parts else (0,)
+try:
+    from packaging.version import parse as _pkg_parse, InvalidVersion
 
+    def version_lt(a: str, b: str) -> bool:
+        """Return True if version a < version b (semantic, packaging-aware)."""
+        try:
+            return _pkg_parse(a) < _pkg_parse(b)
+        except InvalidVersion:
+            # Fallback for truly non-standard strings (e.g. OpenSSL "1.1.1t")
+            # Strip trailing letter(s) and compare numerically
+            def _strip(v: str) -> tuple[int, ...]:
+                parts = []
+                for seg in re.split(r'[.\-_]', v):
+                    m = re.match(r'(\d+)', seg)
+                    if m:
+                        parts.append(int(m.group(1)))
+                return tuple(parts) or (0,)
+            return _strip(a) < _strip(b)
 
-def version_lt(a: str, b: str) -> bool:
-    """Return True if version a < version b (semantic)."""
-    return _parse_ver(a) < _parse_ver(b)
+except ImportError:
+    # packaging not installed — use numeric-only fallback
+    def version_lt(a: str, b: str) -> bool:  # type: ignore[misc]
+        def _strip(v: str) -> tuple[int, ...]:
+            parts = []
+            for seg in re.split(r'[.\-_]', v):
+                m = re.match(r'(\d+)', seg)
+                if m:
+                    parts.append(int(m.group(1)))
+            return tuple(parts) or (0,)
+        return _strip(a) < _strip(b)
 
 
 def version_satisfies_lt(version: str, ceiling: str) -> bool:
@@ -437,9 +457,13 @@ def query_nvd(product: str, version: Optional[str],
               api_key: Optional[str] = None,
               timeout: int = 15) -> list[dict]:
     """
-    Query NVD for CVEs matching `product` (and optionally `version`).
+    Query NVD for CVEs matching `product` + `version`.
     Returns list of {"id", "cvss", "desc"} dicts (top 5 by severity).
-    Returns [] on any error.
+
+    Improvements (Gemini feedback):
+      • Exponential backoff (3 retries) for 503 / transient failures
+      • Relevance filter: only keep CVEs whose description mentions
+        the product name or version string (reduces keyword-search FPs)
     """
     if not version:
         return []
@@ -452,41 +476,72 @@ def query_nvd(product: str, version: Optional[str],
         "resultsPerPage": 10,
     }
 
-    try:
-        resp = requests.get(NVD_API, params=params, headers=headers,
-                            timeout=timeout)
-        if resp.status_code != 200:
+    # ── Exponential backoff retry (fix for feedback point 2) ──
+    last_exc: Optional[Exception] = None
+    for attempt in range(3):
+        try:
+            resp = requests.get(NVD_API, params=params, headers=headers,
+                                timeout=timeout)
+            if resp.status_code == 200:
+                break
+            if resp.status_code in (503, 429, 500):
+                # Transient — wait and retry
+                wait = 2 ** attempt          # 1s, 2s, 4s
+                time.sleep(wait)
+                last_exc = Exception(f"HTTP {resp.status_code}")
+                continue
+            # Non-retryable error (e.g. 403 bad key)
             return []
+        except requests.exceptions.RequestException as exc:
+            last_exc = exc
+            if attempt < 2:
+                time.sleep(2 ** attempt)
+            continue
+    else:
+        # All retries exhausted
+        return []
 
+    try:
         data = resp.json()
-        results = []
-        for item in data.get("vulnerabilities", []):
-            cve = item.get("cve", {})
-            cve_id = cve.get("id", "")
-
-            # CVSS v3 preferred, fall back to v2
-            cvss = 0.0
-            metrics = cve.get("metrics", {})
-            v3_list = metrics.get("cvssMetricV31", metrics.get("cvssMetricV30", []))
-            v2_list = metrics.get("cvssMetricV2", [])
-            if v3_list:
-                cvss = v3_list[0].get("cvssData", {}).get("baseScore", 0.0)
-            elif v2_list:
-                cvss = v2_list[0].get("cvssData", {}).get("baseScore", 0.0)
-
-            # Short description
-            descs = cve.get("descriptions", [])
-            desc  = next((d["value"] for d in descs if d["lang"] == "en"), "")
-            desc  = desc[:200] + "…" if len(desc) > 200 else desc
-
-            results.append({"id": cve_id, "cvss": cvss, "desc": desc})
-
-        # Sort by severity descending, keep top 5
-        results.sort(key=lambda x: x["cvss"], reverse=True)
-        return results[:5]
-
     except Exception:
         return []
+
+    results = []
+    # Version string variants for relevance filter (feedback point 3)
+    ver_variants = {version, version.split(".")[0]}
+    prod_lower   = product.lower()
+
+    for item in data.get("vulnerabilities", []):
+        cve    = item.get("cve", {})
+        cve_id = cve.get("id", "")
+
+        # CVSS v3 preferred, fall back to v2
+        cvss = 0.0
+        metrics = cve.get("metrics", {})
+        v3_list = metrics.get("cvssMetricV31", metrics.get("cvssMetricV30", []))
+        v2_list = metrics.get("cvssMetricV2", [])
+        if v3_list:
+            cvss = v3_list[0].get("cvssData", {}).get("baseScore", 0.0)
+        elif v2_list:
+            cvss = v2_list[0].get("cvssData", {}).get("baseScore", 0.0)
+
+        # Short description
+        descs = cve.get("descriptions", [])
+        desc  = next((d["value"] for d in descs if d["lang"] == "en"), "")
+
+        # ── Relevance filter: discard CVEs that don't mention the
+        #    product or version anywhere in the description.
+        #    This eliminates most false positives from broad keyword queries.
+        desc_lower = desc.lower()
+        if prod_lower not in desc_lower and not any(v in desc_lower for v in ver_variants):
+            continue
+
+        desc = desc[:200] + "…" if len(desc) > 200 else desc
+        results.append({"id": cve_id, "cvss": cvss, "desc": desc})
+
+    # Sort by severity descending, keep top 5
+    results.sort(key=lambda x: x["cvss"], reverse=True)
+    return results[:5]
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -526,11 +581,13 @@ def compute_severity(is_eol: bool, cves: list[dict]) -> str:
 # ═══════════════════════════════════════════════════════════════
 
 def _fetch(url: str, timeout: int) -> Optional[requests.Response]:
+    # Narrow to network errors only — allows KeyboardInterrupt to propagate
+    # (fix for Gemini feedback point 4)
     try:
         return requests.get(url, headers={"User-Agent": "Mozilla/5.0"},
                             timeout=timeout, verify=False,
                             allow_redirects=True)
-    except Exception:
+    except requests.exceptions.RequestException:
         return None
 
 
@@ -549,12 +606,13 @@ def fingerprint_headers(response: requests.Response,
 
 
 def fingerprint_html(response: requests.Response,
-                     url: str) -> list[Component]:
+                     url: str,
+                     soup: BeautifulSoup) -> list[Component]:
+    """Accepts a pre-parsed BeautifulSoup object (fix for feedback point 5)."""
     comps = []
-    text  = response.text[:200_000]   # cap at 200 kB
+    text  = response.text[:200_000]
 
     # Meta generator
-    soup = BeautifulSoup(text, "html.parser")
     meta = soup.find("meta", attrs={"name": re.compile("generator", re.I)})
     if meta:
         content = meta.get("content", "")
@@ -568,7 +626,6 @@ def fingerprint_html(response: requests.Response,
     for product, pattern, grp in TEXT_PATTERNS:
         m = pattern.search(text)
         if m:
-            # Avoid duplicates from meta already found
             already = any(c.product == product for c in comps)
             if not already:
                 comps.append(Component(product, m.group(grp),
@@ -578,10 +635,11 @@ def fingerprint_html(response: requests.Response,
 
 
 def fingerprint_scripts(response: requests.Response,
-                        url: str) -> list[Component]:
-    comps  = []
-    soup   = BeautifulSoup(response.text[:200_000], "html.parser")
-    seen   = set()
+                        url: str,
+                        soup: BeautifulSoup) -> list[Component]:
+    """Accepts a pre-parsed BeautifulSoup object (fix for feedback point 5)."""
+    comps = []
+    seen  = set()
 
     for script in soup.find_all("script", src=True):
         src = script["src"]
@@ -704,10 +762,16 @@ def fingerprint_url(url: str, timeout: int) -> list[Component]:
     if resp is None:
         return []
 
+    # ── Parse HTML once and share the object (fix for feedback point 5) ──
+    try:
+        soup = BeautifulSoup(resp.text[:200_000], "html.parser")
+    except Exception:
+        soup = BeautifulSoup("", "html.parser")
+
     comps: list[Component] = []
     comps += fingerprint_headers(resp, url)
-    comps += fingerprint_html(resp, url)
-    comps += fingerprint_scripts(resp, url)
+    comps += fingerprint_html(resp, url, soup)      # reuses parsed soup
+    comps += fingerprint_scripts(resp, url, soup)   # reuses parsed soup
     comps += fingerprint_cookies(resp, url)
     comps += fingerprint_special_files(url, timeout)
     comps += fingerprint_whatweb(url, timeout)
