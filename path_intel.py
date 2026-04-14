@@ -75,6 +75,20 @@ SEVERITY_RANK = {"CRITICAL": 4, "HIGH": 3, "MEDIUM": 2, "LOW": 1, "INFO": 0}
 
 PRINT_LOCK = threading.Lock()
 
+# Thread-safe set: tracks which hosts have already had security-header
+# checks run (fix 2 — avoids N duplicate header findings per host).
+_CHECKED_HOSTS: set[str] = set()
+_CHECKED_HOSTS_LOCK = threading.Lock()
+
+
+def _host_header_checked(host: str) -> bool:
+    """Return True if this host was already checked; register if not."""
+    with _CHECKED_HOSTS_LOCK:
+        if host in _CHECKED_HOSTS:
+            return True
+        _CHECKED_HOSTS.add(host)
+        return False
+
 
 def safe_print(*a, **kw):
     with PRINT_LOCK:
@@ -577,31 +591,69 @@ def scan_url(url: str, index: int, total: int,
         seen_descs.add(desc)
         findings.append(Finding(url, category, severity, desc, evidence))
 
-    # ── Step 1: URL-pattern matching (no fetch needed) ────────
-    for category, severity, description, pattern in URL_RULES:
-        if pattern.search(url):
-            add(category, severity, description)
-
-    # ── Step 2: Fetch and content analysis ───────────────────
+    # ── Step 1: Fetch first — never flag before we know the status ──
+    # FIX 1 (Gemini): URL rules previously fired on the URL string alone,
+    # before any HTTP request. A 404'd .env path would be flagged CRITICAL.
+    # Now we fetch first and only apply URL_RULES on a confirmed 200 OK.
     resp = fetch(url, timeout)
+
     if resp is None:
         safe_print(f"  [{index}/{total}] Unreachable: {url}")
         return findings
 
-    safe_print(f"  [{index}/{total}] [{resp.status_code}] {url}")
+    # FIX 4 (Gemini): Detect WAF / rate-limit responses explicitly
+    if resp.status_code == 429:
+        safe_print(f"  [{index}/{total}] [429] ⚠  Rate-limited on {url} "
+                   f"— reduce --threads or add delay")
+        return findings
+    if resp.status_code == 403:
+        # 403 can mean WAF block OR legitimate access control.
+        # Log it but don't treat as a full miss — content rules still apply.
+        safe_print(f"  [{index}/{total}] [403] {url}  (WAF block or access control)")
+    else:
+        safe_print(f"  [{index}/{total}] [{resp.status_code}] {url}")
 
-    # Skip non-text responses
+    # ── Step 2: URL-pattern rules — only on HTTP 200 with non-empty body ──
+    # FIX 1 (Gemini): only fire on confirmed 200 (not 404/403).
+    # ADDITIONAL FIX: also require non-empty body.
+    #
+    # PHP files like db.php and wp-config.php can return HTTP 200 but an
+    # empty body — the PHP interpreter executed the file server-side and
+    # output nothing. The SOURCE CODE is not exposed to the client.
+    # Flagging an empty-body 200 as "DB credentials exposed" is a false
+    # positive. We only flag when there is actual readable content returned.
+    if resp.status_code == 200 and len(resp.content) > 0:
+        for category, severity, description, pattern in URL_RULES:
+            if pattern.search(url):
+                add(category, severity, description)
+
+    # ── Step 3: Content-type guard ────────────────────────────────────────
     ct = resp.headers.get("Content-Type", "")
     if not any(t in ct for t in ("text/", "application/json",
                                   "application/xml", "application/javascript")):
         return findings
 
-    try:
-        soup = BeautifulSoup(resp.text[:300_000], "html.parser")
-    except Exception:
-        soup = BeautifulSoup("", "html.parser")
+    # FIX 3 (Gemini): Only parse HTML with BeautifulSoup.
+    # Feeding a 300 kB minified JSON blob or React bundle to html.parser
+    # is CPU-wasteful and produces a meaningless DOM tree.
+    if "text/html" in ct:
+        try:
+            soup = BeautifulSoup(resp.text[:300_000], "html.parser")
+        except Exception:
+            soup = BeautifulSoup("", "html.parser")
+    else:
+        soup = BeautifulSoup("", "html.parser")   # empty — regex rules still apply
+
+    # ── Step 4: Content rules ─────────────────────────────────────────────
+    host = urlsplit(url).netloc
+    already_checked_headers = _host_header_checked(host)
 
     for category, severity, description, check_fn in CONTENT_RULES:
+        # FIX 2 (Gemini): Security-header rules run once per host only.
+        # Headers like X-Frame-Options are set at server/vhost level — the
+        # same finding would otherwise appear for every single URL scanned.
+        if category == "Missing Security Header" and already_checked_headers:
+            continue
         try:
             if check_fn(resp, soup, url):
                 evidence = get_evidence(resp, description)
@@ -609,8 +661,7 @@ def scan_url(url: str, index: int, total: int,
         except Exception:
             continue
 
-    # ── Step 3: Extra detail for some findings ────────────────
-    # robots.txt — extract Disallow paths
+    # ── Step 5: robots.txt detail ─────────────────────────────────────────
     if url.endswith("robots.txt") and resp.status_code == 200:
         disallows = re.findall(r'Disallow:\s*(\S+)', resp.text)
         if disallows:
@@ -623,7 +674,7 @@ def scan_url(url: str, index: int, total: int,
                     "robots.txt — may disclose hidden paths",
                     f"Interesting Disallow entries: {', '.join(interesting[:10])}")
 
-    # HTML comments with sensitive keywords
+    # ── Step 6: Sensitive HTML comments ──────────────────────────────────
     if resp.status_code == 200 and "text/html" in ct:
         comments = re.findall(r'<!--(.*?)-->', resp.text[:100_000], re.DOTALL)
         for comment in comments:
