@@ -6,7 +6,7 @@ from __future__ import annotations
 #  Used by detail_scan.sh Stage 4
 #
 #  Usage:
-#    python3 vuln_scan.py [dir_discovery.txt] [--out DIR]
+#    python3 vuln_scan.py [FULL_URL.txt] [--out DIR]
 #                         [--threads N] [--timeout S]
 #
 #  Key improvements over v1:
@@ -122,30 +122,45 @@ def read_urls(path: Path) -> list[str]:
 def run_scan(title: str, cmd: list[str], log_path: Path,
              target: str, timeout: int) -> tuple[int, float]:
     """
-    Run a subprocess, tee output to log_path, and return
-    (returncode, elapsed_seconds).  Kills process after `timeout` s.
+    Run a subprocess, stream output line-by-line to log_path + console,
+    and return (returncode, elapsed_seconds).  Kills process after `timeout` s.
+
+    Streaming (not communicate()) ensures partial output is written to the
+    log even when the process is killed on timeout.
     """
     log_path.parent.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
 
     try:
-        with log_path.open("w") as log:
+        with log_path.open("w", buffering=1) as log:
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                bufsize=1,          # line-buffered
             )
+            timed_out = False
             try:
-                stdout, _ = proc.communicate(timeout=timeout)
-                log.write(stdout)
-                # Stream to console line by line
-                for line in stdout.splitlines():
-                    print(f"  {line}")
+                for line in proc.stdout:              # streams as nuclei writes
+                    log.write(line)
+                    log.flush()
+                    print(f"  {line}", end="")
+                    if time.time() - t0 >= timeout:
+                        raise subprocess.TimeoutExpired(cmd, timeout)
+                proc.wait(timeout=5)
             except subprocess.TimeoutExpired:
                 proc.kill()
-                stdout, _ = proc.communicate()
-                log.write(stdout)
+                # Drain any remaining buffered output
+                try:
+                    for line in proc.stdout:
+                        log.write(line)
+                        log.flush()
+                        print(f"  {line}", end="")
+                except Exception:
+                    pass
+                proc.wait()
+                timed_out = True
                 warn(f"  [!] {title} timed out after {timeout}s → {target}")
                 return -1, time.time() - t0
 
@@ -177,17 +192,37 @@ def nikto_worker(args_tuple) -> dict:
 # ── Nuclei (single call for all URLs via -l) ─────────────────
 
 def run_nuclei(url_list_path: Path, out_dir: Path, timeout: int) -> dict:
-    log_path = out_dir / "nuclei" / "nuclei_combined.log"
+    log_path     = out_dir / "nuclei" / "nuclei_combined.log"
+    findings_txt = log_path.with_suffix(".txt")
     info(f"\n  [Nuclei] Scanning {url_list_path} (combined run)...")
     cmd = [
         "nuclei",
-        "-l", str(url_list_path),
+        "-l",        str(url_list_path),
         "-severity", "medium,high,critical",
-        "-o", str(log_path.with_suffix(".txt")),
-        "-silent",
+        "-o",        str(findings_txt),
+        # ── output: NOT -silent so findings stream to stdout → captured in log
+        "-stats",                  # show live progress line
+        "-no-color",               # clean log without ANSI escape codes
+        # ── per-request / per-host limits ──
+        "-timeout",  "10",         # seconds per HTTP request
+        "-rl",       "50",         # max HTTP requests per second
+        "-c",        "20",         # parallel template executions
+        "-bulk-size","10",         # hosts processed per template batch
     ]
     rc, elapsed = run_scan("Nuclei", cmd, log_path, str(url_list_path), timeout)
-    return {"log": str(log_path), "rc": rc, "elapsed": elapsed}
+
+    # Report how many findings landed in the output file (even partial)
+    finding_count = 0
+    if findings_txt.exists():
+        finding_count = sum(1 for ln in findings_txt.read_text(errors="ignore").splitlines() if ln.strip())
+
+    return {
+        "log":           str(log_path),
+        "findings_file": str(findings_txt),
+        "findings":      finding_count,
+        "rc":            rc,
+        "elapsed":       elapsed,
+    }
 
 
 # ── main ──────────────────────────────────────────────────────
@@ -296,13 +331,15 @@ def main():
         print(f"  {lbl_nlogs:<25}: {nikto_dir}/")
 
     if has_nuclei:
-        nrc = nuclei_result.get('rc', -1)
+        nrc    = nuclei_result.get('rc', -1)
+        nfinds = nuclei_result.get('findings', 0)
         lbl_nstatus = "Nuclei status"
         lbl_nlog    = "Nuclei log"
         lbl_nfind   = "Nuclei findings"
-        print(f"  {lbl_nstatus:<25}: {'OK' if nrc == 0 else f'rc={nrc}'}")
+        status_str  = "OK" if nrc == 0 else ("TIMEOUT (partial)" if nrc == -1 else f"rc={nrc}")
+        print(f"  {lbl_nstatus:<25}: {status_str}")
         print(f"  {lbl_nlog:<25}: {nuclei_dir}/nuclei_combined.log")
-        print(f"  {lbl_nfind:<25}: {nuclei_dir}/nuclei_combined.txt")
+        print(f"  {lbl_nfind:<25}: {nuclei_dir}/nuclei_combined.txt ({nfinds} findings)")
 
     success("\n[+] Stage 4 complete.\n")
 
