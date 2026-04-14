@@ -966,26 +966,45 @@ def main():
         print(f"[-] File not found: {args.input_file}")
         sys.exit(1)
 
-    urls = list(dict.fromkeys(
+    all_urls = list(dict.fromkeys(
         u if u.startswith("http") else "http://" + u for u in raw
     ))
 
-    # Deduplicate to unique hosts for initial fingerprint
+    # ── Two-tier URL strategy (no hardcoded cap) ─────────────
+    #
+    # Tier 1 — one URL per unique hostname:
+    #   HTTP headers, <meta> generators, cookies, and the Server
+    #   header are identical across every page on the same host.
+    #   Scanning all 200 paths would waste time returning the same
+    #   Apache/PHP version 200 times.
+    #
+    # Tier 2 — every unique URL:
+    #   <script src> tags and special files (package.json, readme.txt,
+    #   etc.) can differ page-by-page, so we include the full list.
+    #   The deduplicate() call later collapses identical findings.
+    #
+    # Result: no arbitrary [:50] cut-off; scales to any number of URLs.
+
     seen_hosts: set[str] = set()
-    scan_urls: list[str] = []
-    for u in urls:
+    host_urls: list[str] = []          # one URL per host (Tier 1)
+    for u in all_urls:
         host = urlsplit(u).netloc
         if host not in seen_hosts:
             seen_hosts.add(host)
-            scan_urls.append(u)
-    # Also include all unique full URLs (for script-level detection)
-    scan_urls = list(dict.fromkeys(scan_urls + urls))[:50]  # cap at 50
+            host_urls.append(u)
+
+    # Combine: host representatives first, then remaining unique URLs
+    scan_urls: list[str] = list(dict.fromkeys(host_urls + all_urls))
 
     use_nvd = not args.no_nvd
-    print(f"\n[+] version_scan.py — {len(scan_urls)} URL(s) | "
-          f"threads={args.threads} | NVD={'ON' if use_nvd else 'OFF'}")
+    print(f"\n[+] version_scan.py")
+    print(f"    Input URLs    : {len(all_urls)}")
+    print(f"    Unique hosts  : {len(host_urls)}")
+    print(f"    Scan targets  : {len(scan_urls)}  (host deduplicated + full URL list)")
+    print(f"    Threads       : {args.threads}")
+    print(f"    NVD lookup    : {'ON' if use_nvd else 'OFF (--no-nvd)'}")
     if use_nvd:
-        print(f"    NVD rate-limit mode: {'API key provided' if args.nvd_key else 'no key (throttled)'}")
+        print(f"    NVD key       : {'provided' if args.nvd_key else 'none (rate-throttled to ~9 req/min)'}")
     print("=" * 60)
 
     # ── concurrent fingerprinting ─────────────────────────────
@@ -1008,23 +1027,24 @@ def main():
             except Exception as exc:
                 safe_print(f"    [!] Error: {exc}")
 
-    # ── deduplication ────────────────────────────────────────
+    # ── deduplication ─────────────────────────────────────────
+    # Collapses identical (product, version) pairs regardless of
+    # how many URLs returned the same finding.
     unique = deduplicate(all_components)
     print(f"\n[+] Unique components detected: {len(unique)}")
 
-    # ── assessment ───────────────────────────────────────────
-    print(f"[+] Assessing components{'  (NVD CVE lookup in progress...)' if use_nvd else '  (EOL check only)'}...")
+    # ── assessment ────────────────────────────────────────────
+    print(f"[+] Assessing {len(unique)} component(s)"
+          f"{'  — NVD CVE lookup running...' if use_nvd else '  (EOL check only, offline)'}...")
     assessments: list[Assessment] = []
 
-    # CVE lookups are rate-limited — run sequentially to respect NVD limits
+    # NVD calls are rate-limited; run sequentially to respect quota
     for comp in unique:
         a = assess_component(comp, use_nvd=use_nvd, nvd_key=args.nvd_key)
         assessments.append(a)
 
-    # ── console table ─────────────────────────────────────────
+    # ── output ────────────────────────────────────────────────
     print_summary_table(assessments)
-
-    # ── write reports ─────────────────────────────────────────
     write_text_report(assessments, args.out_txt)
     write_json_report(assessments, args.out_json)
 
