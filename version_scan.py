@@ -98,12 +98,18 @@ def safe_print(*a, **kw):
 EOL_DB: dict[str, list[tuple[str, str]]] = {
     # ── Web Servers ───────────────────────────────────────────
     "apache": [
-        ("<2.4.0",  "2013-02-25"),
-        ("<2.4.59", "2024-04-03"),   # 2.4.x still maintained; flag anything < latest stable
+        ("<2.2.0",  "2017-12-31"),   # Apache 2.0.x and earlier — EOL Dec 2017
+        ("<2.4.0",  "2017-12-31"),   # Apache 2.2.x — EOL Dec 2017
+        # Apache 2.4.x is the current supported branch; individual patch versions
+        # are not separately EOL-tracked — flag only clearly old minor series
+        ("<2.4.10", "2018-06-01"),   # Very old 2.4.x releases (pre-2015)
     ],
     "nginx": [
-        ("<1.0.0",  "2012-04-12"),
-        ("<1.18.0", "2021-04-20"),
+        ("<1.0.0",  "2012-04-12"),   # 0.x mainline — EOL
+        ("<1.12.0", "2019-04-14"),   # 1.10.x legacy stable — EOL
+        ("<1.14.0", "2021-04-14"),   # 1.12.x legacy stable — EOL
+        # 1.16.x, 1.18.x, 1.20.x, 1.22.x are prior stable branches; still
+        # receive security backports in some distros, so avoid blanket EOL flag
     ],
     "iis": [
         ("<7.0",  "2015-07-14"),
