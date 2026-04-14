@@ -65,7 +65,7 @@ TARGET=$(echo "$TARGET" | sed 's/\/$//')
 
 PIPELINE_START=$(date +%s)
 
-echo -e "\n${BOLD}${CYAN}  autoFuzz — Detail Scan Pipeline${NC}"
+echo -e "\n${BOLD}${CYAN}  autoFah — Detail Scan Pipeline${NC}"
 echo -e "  Target  : ${YELLOW}${TARGET}${NC}"
 echo -e "  Started : $(date '+%Y-%m-%d %H:%M:%S')\n"
 
