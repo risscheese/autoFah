@@ -282,20 +282,27 @@ def main():
     total_elapsed = time.time() - t_start
     banner("Stage 4 — Summary")
 
-    print(f"  {"Targets scanned":<25}: {len(filtered)}")
-    print(f"  {"Total elapsed":<25}: {total_elapsed:.1f}s")
+    lbl_targets  = "Targets scanned"
+    lbl_elapsed   = "Total elapsed"
+    print(f"  {lbl_targets:<25}: {len(filtered)}")
+    print(f"  {lbl_elapsed:<25}: {total_elapsed:.1f}s")
 
     if has_nikto:
         ok  = sum(1 for r in nikto_results if r['rc'] == 0)
         err = len(nikto_results) - ok
-        print(f"  {"Nikto scans":<25}: {ok} OK, {err} errors")
-        print(f"  {"Nikto logs":<25}: {nikto_dir}/")
+        lbl_nikto   = "Nikto scans"
+        lbl_nlogs   = "Nikto logs"
+        print(f"  {lbl_nikto:<25}: {ok} OK, {err} errors")
+        print(f"  {lbl_nlogs:<25}: {nikto_dir}/")
 
     if has_nuclei:
         nrc = nuclei_result.get('rc', -1)
-        print(f"  {"Nuclei status":<25}: {'OK' if nrc == 0 else f'rc={nrc}'}")
-        print(f"  {"Nuclei log":<25}: {nuclei_dir}/nuclei_combined.log")
-        print(f"  {"Nuclei findings":<25}: {nuclei_dir}/nuclei_combined.txt")
+        lbl_nstatus = "Nuclei status"
+        lbl_nlog    = "Nuclei log"
+        lbl_nfind   = "Nuclei findings"
+        print(f"  {lbl_nstatus:<25}: {'OK' if nrc == 0 else f'rc={nrc}'}")
+        print(f"  {lbl_nlog:<25}: {nuclei_dir}/nuclei_combined.log")
+        print(f"  {lbl_nfind:<25}: {nuclei_dir}/nuclei_combined.txt")
 
     success("\n[+] Stage 4 complete.\n")
 
