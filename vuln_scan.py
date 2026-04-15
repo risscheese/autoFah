@@ -149,7 +149,7 @@ def run_scan(title: str, cmd: list[str], log_path: Path,
                     print(f"  {line}", end="")
                     if time.time() - t0 >= timeout:
                         raise subprocess.TimeoutExpired(cmd, timeout)
-                proc.wait(timeout=5)
+                proc.wait(timeout=30)
             except subprocess.TimeoutExpired:
                 proc.kill()
                 # Drain any remaining buffered output
@@ -225,10 +225,9 @@ def run_nuclei(url_list_path: Path, out_dir: Path, timeout: int) -> dict:
         "-o",        str(findings_txt),
         # ── output controls ──
         # NOTE: do NOT use -stats: it uses \r rewrites that break line-by-line
-        #       stdout streaming and corrupt the log file.
-        "-no-color",               # clean log without ANSI escape codes
+        #       stdout streaming and corrupt the log file.               
         # ── per-request / per-host limits ──
-        "-timeout",  "10",         # seconds per HTTP request
+        "-timeout",  "60",         # seconds per HTTP request
         "-rl",       "75",         # max HTTP requests per second (match manual)
         "-c",        "25",         # parallel template executions
         "-bulk-size","25",         # hosts processed per template batch
@@ -360,7 +359,10 @@ def main():
     print(f"  {lbl_elapsed:<25}: {total_elapsed:.1f}s")
 
     if has_nikto:
-        ok  = sum(1 for r in nikto_results if r['rc'] == 0)
+        # NOTE: Nikto returns non-zero when it finds vulnerabilities — that is
+        # a successful scan, NOT an error. Only rc == -1 means a real failure
+        # (killed by timeout or exception in run_scan).
+        ok  = sum(1 for r in nikto_results if r['rc'] != -1)
         err = len(nikto_results) - ok
         lbl_nikto   = "Nikto scans"
         lbl_nlogs   = "Nikto logs"
