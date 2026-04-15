@@ -272,10 +272,10 @@ def parse_args():
                    help="Output directory (default: vuln_results)")
     p.add_argument("--threads", type=int, default=4,
                    help="Parallel Nikto workers (default: 4)")
-    p.add_argument("--timeout", type=int, default=300,
-                   help="Timeout per Nikto scan in seconds (default: 300)")
-    p.add_argument("--nuclei-timeout", type=int, default=600,
-                   help="Overall Nuclei timeout in seconds (default: 600)")
+    p.add_argument("--timeout", type=int, default=1200,
+                   help="Timeout per Nikto scan in seconds (default: 1200)")
+    p.add_argument("--nuclei-timeout", type=int, default=1200,
+                   help="Overall Nuclei timeout in seconds (default: 1200)")
     return p.parse_args()
 
 
