@@ -20,6 +20,7 @@ from __future__ import annotations
 # ============================================================
 
 import argparse
+import re
 import shutil
 import subprocess
 import sys
@@ -191,6 +192,28 @@ def nikto_worker(args_tuple) -> dict:
 
 # ── Nuclei (single call for all URLs via -l) ─────────────────
 
+# Nuclei finding line pattern: starts with "[template-id]" bracket
+_NUCLEI_FINDING_RE = re.compile(r'^\s*\[.+?\]\s+\[.+?\]\s+\[(?:info|low|medium|high|critical)\]\s+', re.IGNORECASE)
+
+
+def _extract_findings_from_log(log_path: Path) -> list[str]:
+    """
+    Parse nuclei findings from the streamed log.
+    Nuclei finding lines look like:
+      [template-id] [protocol] [severity] http://...
+    This is the fallback for when nuclei is killed before it writes -o.
+    """
+    findings = []
+    if not log_path.exists():
+        return findings
+    for line in log_path.read_text(errors="ignore").splitlines():
+        # Strip ANSI colour codes before matching
+        clean = re.sub(r'\033\[[0-9;]*m', '', line).strip()
+        if _NUCLEI_FINDING_RE.match(clean):
+            findings.append(clean)
+    return findings
+
+
 def run_nuclei(url_list_path: Path, out_dir: Path, timeout: int) -> dict:
     log_path     = out_dir / "nuclei" / "nuclei_combined.log"
     findings_txt = log_path.with_suffix(".txt")
@@ -200,21 +223,35 @@ def run_nuclei(url_list_path: Path, out_dir: Path, timeout: int) -> dict:
         "-l",        str(url_list_path),
         "-severity", "medium,high,critical",
         "-o",        str(findings_txt),
-        # ── output: NOT -silent so findings stream to stdout → captured in log
-        "-stats",                  # show live progress line
+        # ── output controls ──
+        # NOTE: do NOT use -stats: it uses \r rewrites that break line-by-line
+        #       stdout streaming and corrupt the log file.
         "-no-color",               # clean log without ANSI escape codes
         # ── per-request / per-host limits ──
         "-timeout",  "10",         # seconds per HTTP request
-        "-rl",       "50",         # max HTTP requests per second
-        "-c",        "20",         # parallel template executions
-        "-bulk-size","10",         # hosts processed per template batch
+        "-rl",       "75",         # max HTTP requests per second (match manual)
+        "-c",        "25",         # parallel template executions
+        "-bulk-size","25",         # hosts processed per template batch
     ]
     rc, elapsed = run_scan("Nuclei", cmd, log_path, str(url_list_path), timeout)
 
-    # Report how many findings landed in the output file (even partial)
+    # ── Count findings ──────────────────────────────────────────
+    # IMPORTANT: nuclei only writes the -o file on CLEAN exit.
+    # If the process was killed (timeout, Ctrl-C), -o file will be empty or
+    # missing even though findings streamed to stdout (and our log).
+    # Always fall back to parsing the streamed log.
     finding_count = 0
     if findings_txt.exists():
-        finding_count = sum(1 for ln in findings_txt.read_text(errors="ignore").splitlines() if ln.strip())
+        lines = [ln for ln in findings_txt.read_text(errors="ignore").splitlines() if ln.strip()]
+        finding_count = len(lines)
+
+    if finding_count == 0:
+        # Timeout/kill scenario — extract findings from streamed log
+        log_findings = _extract_findings_from_log(log_path)
+        if log_findings:
+            warn(f"  [!] -o file empty (timeout/kill). Recovered {len(log_findings)} finding(s) from log.")
+            findings_txt.write_text("\n".join(log_findings) + "\n")
+            finding_count = len(log_findings)
 
     return {
         "log":           str(log_path),
@@ -235,10 +272,10 @@ def parse_args():
                    help="Output directory (default: vuln_results)")
     p.add_argument("--threads", type=int, default=4,
                    help="Parallel Nikto workers (default: 4)")
-    p.add_argument("--timeout", type=int, default=300,
-                   help="Timeout per Nikto scan in seconds (default: 300)")
-    p.add_argument("--nuclei-timeout", type=int, default=600,
-                   help="Overall Nuclei timeout in seconds (default: 600)")
+    p.add_argument("--timeout", type=int, default=1200,
+                   help="Timeout per Nikto scan in seconds (default: 1200)")
+    p.add_argument("--nuclei-timeout", type=int, default=1200,
+                   help="Overall Nuclei timeout in seconds (default: 1200)")
     return p.parse_args()
 
 
