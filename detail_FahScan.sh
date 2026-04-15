@@ -224,7 +224,6 @@ STAGE4_START=$(date +%s)
 echo -e "${YELLOW}[~] Launching vuln_scan.py — ${VULN_THREADS} Nikto workers, nuclei combined...${NC}"
 
 python3 "$VULN_SCANNER" \
-    "$ALL_PATHS" \
     --threads "$VULN_THREADS" \
     --timeout "$VULN_TIMEOUT"
 
