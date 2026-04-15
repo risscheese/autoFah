@@ -307,12 +307,26 @@ GOBUSTER_THREADS=20    # Concurrent gobuster workers
 PARA_THREADS=10        # Concurrent para.py URL workers
 PARA_TIMEOUT=8         # HTTP timeout (seconds) for para.py
 VULN_THREADS=4         # Parallel Nikto workers
-VULN_TIMEOUT=300       # Max time per Nikto scan (seconds)
+VULN_TIMEOUT=1000      # Max time per Nikto scan (seconds)
 VERSION_THREADS=5      # Concurrent version_scan.py workers
 VERSION_TIMEOUT=10     # HTTP timeout for version fingerprinting
 PATH_THREADS=10        # Concurrent path_intel.py workers
 PATH_TIMEOUT=10        # HTTP timeout for path analysis
 ```
+
+### Nuclei Tuning (`vuln_scan.py`)
+
+Nuclei is called **once** for all targets combined via `-l`. Edit `run_nuclei()` in `vuln_scan.py` to adjust:
+
+| Parameter | Current Value | Description |
+|-----------|---------------|-------------|
+| `-severity` | `medium,high,critical` | Severities to scan (skips `info`/`low` noise) |
+| `-timeout` | `60` | Seconds per HTTP request before timeout |
+| `-rl` | `75` | Max HTTP requests per second (rate limit) |
+| `-c` | `25` | Parallel template executions |
+| `-bulk-size` | `25` | Hosts processed per template batch |
+
+> **Note:** Do not add `-stats` — it uses `\r` rewrites that corrupt the streaming log file.
 
 ---
 
