@@ -14,8 +14,8 @@
 TARGET=$1
 
 # ── wordlists ────────────────────────────────────────────────
-DIR_WORDLIST="dirCommon.txt"
-FILE_WORDLIST="hiddenFiles.txt"
+DIR_WORDLIST="wordlist/directoryWL.txt"
+FILE_WORDLIST="wordlist/filesWL.txt"
 
 # ── output files ─────────────────────────────────────────────
 DIR_FILE="dir_discovery.txt"
