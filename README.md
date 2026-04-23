@@ -362,8 +362,9 @@ autoFah/
 ├── vuln_scan.py             # Stage 4 — Nikto + Nuclei orchestrator
 ├── version_scan.py          # Stage 5 — component version intelligence
 ├── path_intel.py            # Stage 6 — path & file vulnerability analysis
-├── dirCommon.txt            # Directory wordlist (Stage 1)
-├── hiddenFiles.txt          # File wordlist (Stage 2)
+├──wordlist/
+  ├── dirCommon.txt            # Directory wordlist (Stage 1)
+  ├── hiddenFiles.txt          # File wordlist (Stage 2)
 └── README.md
 ```
 
