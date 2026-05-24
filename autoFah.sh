@@ -32,7 +32,6 @@ NC='\033[0m'
 # ── usage ────────────────────────────────────────────────────
 if [ -z "$TARGET" ]; then
     echo -e "${RED}Usage: ./autoFah.sh <target_url>${NC}"
-    echo -e "       e.g.  ./autoFah.sh http://192.168.77.130:5000"
     exit 1
 fi
 
@@ -63,7 +62,6 @@ echo -e "${BOLD}${CYAN}[+] ═════════════════�
 STAGE1_START=$(date +%s)
 echo "$TARGET" > "$DIR_FILE"
 
-# NOTE: Added 401 and 403 to grep so endpoints like /console are not dropped
 gobuster dir \
     -u "$TARGET" \
     -w "$DIR_WORDLIST" \
@@ -101,7 +99,6 @@ while read -r FULL_URL; do
     # Save the base directory URL to the final list
     echo "$FULL_URL" >> "$ALL_PATHS"
     
-    # NOTE: Added 401 and 403 to grep here as well
     GOBUSTER_OUTPUT=$(gobuster dir \
         -u "$FULL_URL" \
         -w "$FILE_WORDLIST" \
