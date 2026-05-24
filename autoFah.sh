@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # ============================================================
-#  autoFah.sh — Recon Stage 1 & 2 Only
+#  autoFah.sh — Recon Stage 1 & 2 Only (With Deep Scan)
 #
-#  Stage 1 : Directory brute-force            (gobuster)
-#  Stage 2 : Hidden file discovery per dir   (gobuster)
+#  Stage 1 : Directory brute-force (Level 1 & 2) (gobuster)
+#  Stage 2 : Hidden file discovery per dir       (gobuster)
 # ============================================================
 
 TARGET=$1
@@ -53,7 +53,7 @@ elapsed() {
 }
 
 # ============================================================
-# STAGE 1 — Directory discovery
+# STAGE 1 — Directory discovery (Level 1 & Level 2)
 # ============================================================
 echo -e "${BOLD}${CYAN}[+] ══════════════════════════════════════${NC}"
 echo -e "${BOLD}${CYAN}    STAGE 1: Directory Discovery${NC}"
@@ -62,6 +62,7 @@ echo -e "${BOLD}${CYAN}[+] ═════════════════�
 STAGE1_START=$(date +%s)
 echo "$TARGET" > "$DIR_FILE"
 
+echo -e "${YELLOW}[~] Phase 1.1: Scanning Base URL...${NC}"
 gobuster dir \
     -u "$TARGET" \
     -w "$DIR_WORDLIST" \
@@ -76,7 +77,32 @@ gobuster dir \
             gsub(/\/+$/, "", path)   # strip any trailing slashes
             if (path != "") print t "/" path
         }
-    ' | sort -u >> "$DIR_FILE"
+    ' >> "$DIR_FILE"
+
+echo -e "${YELLOW}[~] Phase 1.2: Digging deeper for Subdirectories...${NC}"
+# tail -n +2 skips the base URL at the top of the file so we don't scan it twice
+tail -n +2 "$DIR_FILE" | while read -r SUB_DIR; do
+    echo -e "    -> Deep scanning: ${CYAN}$SUB_DIR${NC}"
+    
+    gobuster dir \
+        -u "$SUB_DIR" \
+        -w "$DIR_WORDLIST" \
+        --threads "$GOBUSTER_THREADS" \
+        --no-error \
+        -q \
+        | grep -E "Status: (200|204|301|302)" \
+        | awk -v t="$SUB_DIR" '
+            {
+                path = $1
+                gsub(/^\/+/, "", path)
+                gsub(/\/+$/, "", path)
+                if (path != "") print t "/" path
+            }
+        ' >> "$DIR_FILE"
+done
+
+# Clean up duplicates
+sort -u "$DIR_FILE" -o "$DIR_FILE"
 
 FOUND_DIRS=$(wc -l < "$DIR_FILE")
 echo -e "${GREEN}[+] Found ${FOUND_DIRS} path(s) in $(elapsed $STAGE1_START)s. Saved → $DIR_FILE${NC}"
