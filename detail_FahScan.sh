@@ -137,7 +137,9 @@ echo "--- HIDDEN FILE REPORT ---" > "$RESULT_FILE"
 while read -r FULL_URL; do
     echo -e "${YELLOW}[~] Fuzzing: $FULL_URL${NC}"
     echo "--- Results for $FULL_URL ---" >> "$RESULT_FILE"
-
+    
+    echo "$FULL_URL" >> "$ALL_PATHS"
+    
     GOBUSTER_OUTPUT=$(gobuster dir \
         -u "$FULL_URL" \
         -w "$FILE_WORDLIST" \
