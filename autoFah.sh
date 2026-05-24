@@ -70,7 +70,7 @@ gobuster dir \
     --threads "$GOBUSTER_THREADS" \
     --no-error \
     -q \
-    | grep -E "Status: (200|204|301|302|401|403)" \
+    | grep -E "Status: (200|204|301|302)" \
     | awk -v t="$TARGET" '
         {
             path = $1
@@ -109,7 +109,7 @@ while read -r FULL_URL; do
         --threads "$GOBUSTER_THREADS" \
         --no-error \
         -q \
-        | grep -E "(Status: (200|204|301|302|401|403)|^/)")
+        | grep -E "(Status: (200|204|301|302)|^/)")
 
     echo "$GOBUSTER_OUTPUT" >> "$RESULT_FILE"
     echo "" >> "$RESULT_FILE"
