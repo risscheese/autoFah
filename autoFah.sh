@@ -69,7 +69,7 @@ gobuster dir \
     --threads "$GOBUSTER_THREADS" \
     --no-error \
     -q \
-    | grep -E "Status: (200|204|301|302)" \
+    | grep -E "Status: (200|204|301|302|400|401|403)" \
     | awk -v t="$TARGET" '
         {
             path = $1
